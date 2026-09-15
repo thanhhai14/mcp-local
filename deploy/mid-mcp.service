@@ -1,0 +1,18 @@
+[Unit]
+Description=MID Project & System MCP
+After=network.target
+
+[Service]
+Type=simple
+User=mid-mcp
+Group=mid-mcp
+WorkingDirectory=/opt/mid-project-system-mcp
+ExecStart=/opt/mid-project-system-mcp/.venv/bin/mid-mcp --config /etc/mid-mcp/config.yaml
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

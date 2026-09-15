@@ -1,0 +1,44 @@
+server:
+  name: "MID Project & System MCP"
+  transport: "stdio"
+  host: "127.0.0.1"
+  port: 8000
+  # Add the exact public Host header if Cloudflare forwards it, e.g. mcp.example.com
+  allowed_hosts: []
+  allowed_origins: []
+filesystem:
+  backup_before_write: true
+  backup_retention: 20
+terminal:
+  default_timeout: 30
+  max_timeout: 1800
+  max_output_chars: 50000
+  denied_commands: [shutdown, reboot, poweroff, halt, mkfs, fdisk, parted]
+  allow_sudo: false
+server_terminal:
+  enabled: false
+  allowed_commands: [ip, ss, ping, dig, nslookup, wg, netbird, systemctl, journalctl, nginx, apachectl, docker, curl, openssl]
+system_tools:
+  allow_service_actions: false
+  allowed_services: [nginx, apache2, docker, netbird, postgresql]
+audit_log: "./audit.log"
+projects:
+  example:
+    name: "Example project"
+    path: "/srv/projects/example"
+    permissions:
+      read: true
+      write: true
+      delete: false
+      terminal: true
+      git_read: true
+      git_write: false
+      docker_read: true
+      docker_write: false
+      docker_destructive: false
+    terminal:
+      enabled: true
+      allowed_commands: [git, python, python3, pytest, rg, ls, cat, npm, node, docker]
+    commands:
+      test:
+        command: [python, -m, pytest]
