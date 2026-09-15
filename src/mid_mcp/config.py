@@ -13,11 +13,17 @@ class Permissions(BaseModel):
     write: bool = False
     delete: bool = False
     terminal: bool = False
+    network: bool = False
     git_read: bool = True
     git_write: bool = False
+    git_network: bool = False
     docker_read: bool = False
     docker_write: bool = False
     docker_destructive: bool = False
+    docker_exec: bool = False
+    docker_run: bool = False
+    allow_npx: bool = False
+    npm_exec: bool = False
     service_control: bool = False
     database_read: bool = False
     database_write: bool = False
@@ -26,6 +32,7 @@ class Permissions(BaseModel):
 class TerminalConfig(BaseModel):
     enabled: bool = False
     allowed_commands: list[str] = Field(default_factory=list)
+    allowed_python_modules: list[str] = Field(default_factory=lambda: ["pytest", "compileall", "unittest"])
 
 
 class NamedCommand(BaseModel):
@@ -59,6 +66,38 @@ class GlobalTerminalConfig(BaseModel):
     max_output_chars: int = Field(default=50000, ge=1000)
     denied_commands: list[str] = Field(default_factory=lambda: ["shutdown", "reboot", "poweroff", "halt", "mkfs", "fdisk", "parted"])
     allow_sudo: bool = False
+    allow_npx: bool = False
+    denied_environment: list[str] = Field(default_factory=lambda: [
+        "PATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "GLIBC_TUNABLES",
+        "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONINSPECT", "PYTHONWARNINGS",
+        "NODE_OPTIONS", "NODE_PATH", "RUBYOPT", "PERL5OPT", "GIT_SSH_COMMAND", "GIT_SSH",
+        "GIT_PROXY_COMMAND", "GIT_EXTERNAL_DIFF", "GIT_PAGER", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR",
+        "GIT_ASKPASS", "GIT_EXEC_PATH", "GIT_CONFIG_*", "GIT_TEMPLATE_DIR",
+        "BASH_ENV", "ENV", "SHELLOPTS", "CDPATH", "NPM_CONFIG_*", "COREPACK_HOME",
+        "PYTEST_ADDOPTS", "PYTEST_PLUGINS", "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
+        "PAGER", "MANPAGER", "LESSOPEN", "EDITOR", "VISUAL",
+    ])
+    controlled_path: str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+
+class SensitiveFilesConfig(BaseModel):
+    hide_from_listing: bool = True
+    deny: list[str] = Field(default_factory=lambda: [
+        ".env", ".env.*", "*.pem", "*.key", "id_rsa", "id_ed25519",
+        "credentials", "credentials.*", "secrets", "secrets.*", "*.p12", "*.pfx",
+    ])
+    allow: list[str] = Field(default_factory=lambda: [".env.example", ".env.sample"])
+
+
+class SecurityConfig(BaseModel):
+    sensitive_files: SensitiveFilesConfig = Field(default_factory=SensitiveFilesConfig)
+
+
+class SandboxConfig(BaseModel):
+    enabled: bool = False
+    backend: str = "bubblewrap"
+    required: bool = False
+    network: bool = False
 
 
 class ServerTerminalConfig(BaseModel):
@@ -98,6 +137,8 @@ class AppConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     filesystem: FilesystemConfig = Field(default_factory=FilesystemConfig)
     terminal: GlobalTerminalConfig = Field(default_factory=GlobalTerminalConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
+    sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     server_terminal: ServerTerminalConfig = Field(default_factory=ServerTerminalConfig)
     system_tools: SystemToolsConfig = Field(default_factory=SystemToolsConfig)
     audit_log: Path = Path("audit.log")

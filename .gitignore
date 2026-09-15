@@ -3,6 +3,13 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 *.egg-info/
+# Runtime backups created before MCP file writes; never commit or push them.
 .mcp-backups/
 audit.log
 config.yaml
+.env
+.env.*
+!.env.example
+!.env.sample
+tunnel-client/
+tunnel-client-*/

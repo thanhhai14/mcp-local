@@ -9,12 +9,25 @@ server:
 filesystem:
   backup_before_write: true
   backup_retention: 20
+security:
+  sensitive_files:
+    hide_from_listing: true
+    deny: [.env, ".env.*", "*.pem", "*.key", id_rsa, id_ed25519, credentials, "credentials.*", secrets, "secrets.*", "*.p12", "*.pfx"]
+    allow: [.env.example, .env.sample]
+sandbox:
+  enabled: false
+  backend: bubblewrap
+  required: false
+  network: false
 terminal:
   default_timeout: 30
   max_timeout: 1800
   max_output_chars: 50000
   denied_commands: [shutdown, reboot, poweroff, halt, mkfs, fdisk, parted]
   allow_sudo: false
+  allow_npx: false
+  denied_environment: [PATH, LD_PRELOAD, LD_LIBRARY_PATH, LD_AUDIT, GLIBC_TUNABLES, PYTHONPATH, PYTHONHOME, PYTHONSTARTUP, PYTHONINSPECT, PYTHONWARNINGS, NODE_OPTIONS, NODE_PATH, RUBYOPT, PERL5OPT, GIT_SSH_COMMAND, GIT_SSH, GIT_PROXY_COMMAND, GIT_EXTERNAL_DIFF, GIT_PAGER, GIT_EDITOR, GIT_SEQUENCE_EDITOR, GIT_ASKPASS, GIT_EXEC_PATH, "GIT_CONFIG_*", GIT_TEMPLATE_DIR, BASH_ENV, ENV, SHELLOPTS, CDPATH, "NPM_CONFIG_*", COREPACK_HOME, PYTEST_ADDOPTS, PYTEST_PLUGINS, PYTEST_DISABLE_PLUGIN_AUTOLOAD, PAGER, MANPAGER, LESSOPEN, EDITOR, VISUAL]
+  controlled_path: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 server_terminal:
   enabled: false
   allowed_commands: [ip, ss, ping, dig, nslookup, wg, netbird, systemctl, journalctl, nginx, apachectl, docker, curl, openssl]
@@ -31,14 +44,21 @@ projects:
       write: true
       delete: false
       terminal: true
+      network: false
       git_read: true
       git_write: false
+      git_network: false
       docker_read: true
       docker_write: false
       docker_destructive: false
+      docker_exec: false
+      docker_run: false
+      allow_npx: false
+      npm_exec: false
     terminal:
       enabled: true
       allowed_commands: [git, python, python3, pytest, rg, ls, cat, npm, node, docker]
+      allowed_python_modules: [pytest, compileall, unittest]
     commands:
       test:
         command: [python, -m, pytest]

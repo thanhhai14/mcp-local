@@ -65,19 +65,18 @@ Quyền quản lý tunnel (**Read + Manage**) khác quyền chạy/chọn tunnel
 
 ### Dùng `tunnel-client` trên máy Linux này
 
-Tải bản Linux phù hợp từ Platform tunnel settings. Nếu đã giải nén, dùng binary `tunnel-client`, **không phải** `tunnel-client-runtime`. Bản đã tải trên máy này nằm tại `/home/thanhhai14/Downloads/tunnel-client-v0.0.14-linux-amd64/tunnel-client`. Thêm thư mục binary vào `PATH` của **terminal hiện tại**:
+Tải bản Linux phù hợp từ Platform tunnel settings. Nếu đã giải nén, dùng binary `tunnel-client`, **không phải** `tunnel-client-runtime`. Đặt binary vào project theo mục **Chạy nhanh bằng script** bên dưới (khuyến nghị); cách này không cần thêm `PATH`. Bản đã tải trên máy này hiện nằm tại `/home/thanhhai14/Downloads/tunnel-client-v0.0.14-linux-amd64/tunnel-client` và có thể được sao chép vào `tunnel-client/tunnel-client` trong project.
 
 ```bash
-export PATH="/home/thanhhai14/Downloads/tunnel-client-v0.0.14-linux-amd64:$PATH"
-tunnel-client help quickstart
+./tunnel-client/tunnel-client help quickstart
 ```
 
-`PATH` vừa export chỉ có hiệu lực trong terminal đó. Nếu đổi phiên bản hoặc chuyển máy, thay đường dẫn theo binary thực tế. Chưa cần cài vào thư mục hệ thống.
+Nếu binary vẫn ở thư mục tải xuống, gọi bằng đường dẫn tuyệt đối tương ứng. Không cần cài vào thư mục hệ thống hoặc sửa `PATH`.
 
 Tạo profile cho MID MCP đang dùng `stdio` (thay `TUNNEL_ID_CUA_BAN`):
 
 ```bash
-tunnel-client init \
+./tunnel-client/tunnel-client init \
   --sample sample_mcp_stdio_local \
   --profile mid-project-system \
   --tunnel-id "TUNNEL_ID_CUA_BAN" \
@@ -97,11 +96,51 @@ Sau đó:
 ```bash
 export CONTROL_PLANE_API_KEY
 printf '\nĐộ dài key: %s\n' "${#CONTROL_PLANE_API_KEY}"
-tunnel-client doctor --profile mid-project-system --explain
-tunnel-client run --profile mid-project-system
+./tunnel-client/tunnel-client doctor --profile mid-project-system --explain
+./tunnel-client/tunnel-client run --profile mid-project-system
 ```
 
 Độ dài key phải lớn hơn `0`; lệnh trên không in nội dung key. Chỉ chạy `run` khi `doctor` PASS. Giữ terminal chạy `run` mở trong lúc tạo kết nối và gọi tool từ ChatGPT. Giao diện quản trị local tại URL `/ui` mà `run` thông báo cho biết trạng thái **healthy/ready**. Đóng terminal thì tunnel dừng. Tunnel-client cần HTTPS outbound tới OpenAI. [OpenAI Docs — setup và health](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels).
+
+#### Chạy nhanh bằng script
+
+Đặt binary tunnel-client trong project theo cấu trúc mặc định:
+
+```text
+mcp-local/
+├── .env
+├── config.yaml
+├── scripts/run-tunnel.sh
+└── tunnel-client/tunnel-client
+```
+
+Binary cũng có thể nằm trực tiếp tại `tunnel-client` hoặc trong thư mục `tunnel-client-*` bên trong project. Không cần thêm `PATH`.
+
+Lưu runtime key trong file `/home/thanhhai14/Data/Code/mcp-local/.env`:
+
+```dotenv
+CONTROL_PLANE_API_KEY=YOUR_RUNTIME_KEY
+```
+
+Đặt quyền chỉ chủ sở hữu được đọc rồi chạy:
+
+```bash
+chmod 600 .env
+chmod +x scripts/run-tunnel.sh
+scripts/run-tunnel.sh
+```
+
+Script tự xác định thư mục project dựa trên vị trí của chính nó, nên có thể chạy từ thư mục bất kỳ. Script chỉ đọc dòng `CONTROL_PLANE_API_KEY`; nó **không `source` toàn bộ `.env`**, không in key và chạy `doctor` trước `tunnel-client run`. Nếu muốn dùng binary ở vị trí khác, có thể ghi đè:
+
+```bash
+TUNNEL_CLIENT_BIN=/đường/dẫn/tunnel-client scripts/run-tunnel.sh
+```
+
+Có thể dùng profile hoặc file môi trường khác:
+
+```bash
+TUNNEL_PROFILE=mid-project-system ENV_FILE=/đường/dẫn/.env scripts/run-tunnel.sh
+```
 
 ### Thêm MCP trong ChatGPT
 
@@ -146,10 +185,27 @@ Cloudflare Tunnel tự nó **không xác thực người dùng**. Cloudflare Acc
 
 ## 6. Bảo mật và phạm vi triển khai
 
+- Generic terminal đi qua `CommandPolicyEngine` trước khi tạo subprocess. Engine chuẩn hóa executable theo controlled `PATH`, kiểm tra `cwd`, parse semantic subcommand và fail-closed. `python -c`/stdin, Node eval, shell `-c`, `docker run`/`exec`, Docker write/destructive, Git write/network, `npx` và `npm exec` đều có policy riêng; đường dẫn absolute tới `/usr/bin/...` không bypass được policy. `docker exec` hiện bị chặn hoàn toàn trong generic terminal vì chưa có bộ kiểm tra lệnh bên trong container đủ an toàn.
+- `git_read`, `git_write`, `git_network`, `docker_read`, `docker_write`, `docker_destructive`, `docker_exec`, `docker_run`, `allow_npx` và `npm_exec` là các capability độc lập. `docker_exec` được dành cho dedicated tool trong tương lai; generic terminal vẫn chặn nó. Generic terminal không được cấp nhiều quyền hơn permission project.
+- Sensitive-file policy mặc định ẩn và từ chối đọc `.env*`, key/certificate, credentials/secrets và các file tương tự (trừ `.env.example`/`.env.sample`). Search và directory listing cũng áp dụng policy này. Dữ liệu output/audit được redaction.
+- Environment override nguy hiểm như `PATH`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `PYTHONPATH`, `NODE_OPTIONS`, `GIT_SSH_COMMAND`, `BASH_ENV` và `SHELLOPTS` bị từ chối; subprocess luôn dùng controlled `PATH` và `shell=False`.
+- Có thể bật sandbox tùy chọn bằng `sandbox.enabled: true` và `backend: bubblewrap`. Khi bật mà bubblewrap không khả dụng, execution bị từ chối (không âm thầm chạy unsandboxed). Hãy kiểm tra kỹ distro, quyền user và dependency trước khi bật production.
 - Đường dẫn tệp tương đối đi qua bộ kiểm tra traversal, đường dẫn tuyệt đối và symlink escape. Ghi tệp có thể tạo backup trong `.mcp-backups`; hành động được ghi trong `audit_log`.
-- Executor dùng `argv`, `shell=False`, denylist, timeout và giới hạn output. Nhưng `cwd` và allowlist executable **không giới hạn tiến trình vào filesystem project**. Ví dụ, `python` được phép có thể đọc tệp khác mà tài khoản OS chạy MCP có quyền truy cập.
+- Khi tạo `.mcp-backups` trong một project thuộc Git, filesystem tools kiểm tra quy tắc ignore và tự thêm `.mcp-backups/` nếu cần. Với project nằm trong repository cha, MCP chỉ ghi `.gitignore` trong phạm vi project được cấu hình; nếu repository đã có rule phù hợp thì không tạo thêm dòng trùng.
+- Command policy và path policy không thể thay thế OS sandbox. Nếu sandbox tắt, `python3 scripts/test.py`, `npm run build` và project code vẫn có thể đọc tài nguyên mà tài khoản Linux có quyền truy cập. Đây là trusted-code execution boundary.
 - Docker socket có thể cấp quyền gần tương đương root. Không chạy MCP bằng root hoặc cấp Docker/systemd khi không thật sự cần.
 - Tool hiện có gồm thông tin project, thao tác tệp, tìm kiếm, lệnh project, Git đọc, Docker Compose và thông tin hệ thống cơ bản. Một số khả năng trong prompt thiết kế gốc như quản trị Docker/systemd đầy đủ, PostgreSQL và Odoo **chưa được triển khai**.
 - Để chạy lâu dài, dùng tài khoản OS riêng với quyền tối thiểu, giới hạn project/command, thêm xác thực người dùng và kiểm tra scope cho từng tool nhạy cảm. `deploy/mid-mcp.service` chỉ là mẫu systemd; cần rà soát đường dẫn, filesystem, Docker socket và quyền service trước khi bật.
+
+## 7. Kiểm chứng security regression
+
+Suite hiện có **49 tests**, gồm regression test cho Python/Node/shell escape, script ngoài project, Docker permission bypass, Docker `exec`/`run`, Git write/network, absolute executable resolution, file command đọc ngoài project, traversal, symlink write, sensitive files, environment injection, secret redaction, backup `.gitignore` và chứng minh policy từ chối trước khi executor được gọi:
+
+```bash
+.venv/bin/pytest -q
+# 49 passed
+```
+
+Các probe an toàn tương ứng trả về denial theo policy trước subprocess. Residual risks chính là code project được tin cậy khi chạy build/test, quyền OS của tài khoản chạy MCP, Docker socket và việc server hiện chưa có OAuth cho ChatGPT.
 
 Tài liệu OpenAI có thể thay đổi: [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels), [kết nối ChatGPT](https://developers.openai.com/plugins/deploy/connect-chatgpt), [xác thực MCP](https://developers.openai.com/plugins/build/auth).

@@ -11,10 +11,12 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from .config import AppConfig, load_config
 from .core.audit import AuditLog
+from .core.command_policy import CommandPolicyEngine
 from .core.executor import CommandExecutor
 from .core.result import fail, ok
 from .core.security import SecurityError, render_named_command, resolve_project_path, validate_command
 from .core.project_manager import ProjectManager
+from .core.redaction import redact
 from .tools.docker import DockerTools
 from .tools.filesystem import FilesystemTools
 from .tools.git import GitTools
@@ -25,16 +27,19 @@ from .tools import system as system_tools
 class MidService:
     def __init__(self, config: AppConfig) -> None:
         self.config, self.projects = config, ProjectManager(config)
-        self.executor = CommandExecutor(config); self.files = FilesystemTools(config); self.search = SearchTools()
-        self.git, self.docker, self.audit = GitTools(self.executor), DockerTools(self.executor), AuditLog(config.audit_log)
+        self.executor = CommandExecutor(config); self.files = FilesystemTools(config); self.search = SearchTools(config)
+        self.policy = CommandPolicyEngine(config)
+        self.git, self.docker, self.audit = GitTools(self.executor, config), DockerTools(self.executor, config), AuditLog(config.audit_log)
 
-    def call(self, name: str, project_id: str | None, fn, *args, **kwargs) -> dict:
+    def call(self, name: str, project_id: str | None, fn, *args, audit_details: dict | None = None, **kwargs) -> dict:
         try:
             project = self.projects.get(project_id) if project_id else None
             value = fn(project, *args, **kwargs) if project else fn(*args, **kwargs)
-            self.audit.action(name, "success", project=project_id); return ok(value)
+            self.audit.action(name, "success", project=project_id, **(audit_details or {})); return ok(value)
         except KeyError as exc: return fail("PROJECT_NOT_FOUND", str(exc))
-        except SecurityError as exc: return fail("PERMISSION_DENIED", str(exc))
+        except SecurityError as exc:
+            self.audit.action(name, "denied", project=project_id, reason=str(exc), policy=getattr(exc, "policy", None), **(audit_details or {}))
+            return fail(getattr(exc, "code", "PERMISSION_DENIED"), str(exc), {"policy": getattr(exc, "policy", None)})
         except FileNotFoundError as exc: return fail("FILE_NOT_FOUND", str(exc))
         except (ValueError, IsADirectoryError) as exc: return fail("INVALID_ARGUMENT", str(exc))
         except Exception as exc: return fail("INTERNAL_ERROR", str(exc))
@@ -44,9 +49,11 @@ class MidService:
             from .core.security import require
             require(project, "terminal")
             if not project.terminal.enabled: raise SecurityError("terminal is disabled")
-            validate_command(self.config, project, command)
-            return self.executor.run(command, resolve_project_path(project, cwd, must_exist=True), timeout, env)
-        return self.call("run_project_command", project_id, operation)
+            working_directory = resolve_project_path(project, cwd, must_exist=True)
+            self.policy.enforce(project, command, working_directory)
+            return self.executor.run(command, working_directory, timeout, env, sandbox_root=project.path.resolve())
+        safe_command = redact([str(item)[:500] for item in command])
+        return self.call("run_project_command", project_id, operation, audit_details={"command": safe_command, "cwd": cwd})
 
     def run_named_command(self, project_id: str, command_name: str, parameters: dict[str, str] | None = None) -> dict:
         def operation(project):
@@ -56,9 +63,9 @@ class MidService:
             try: definition = project.commands[command_name]
             except KeyError as exc: raise ValueError(f"named command not found: {command_name}") from exc
             command = render_named_command(definition.command, parameters or {}, definition.parameters)
-            validate_command(self.config, project, command)
-            return self.executor.run(command, project.path.resolve())
-        return self.call("run_project_named_command", project_id, operation)
+            self.policy.enforce(project, command, project.path.resolve())
+            return self.executor.run(command, project.path.resolve(), sandbox_root=project.path.resolve())
+        return self.call("run_project_named_command", project_id, operation, audit_details={"command_name": command_name})
 
 
 def create_server(config: AppConfig) -> FastMCP:
@@ -122,7 +129,7 @@ def create_server(config: AppConfig) -> FastMCP:
     @mcp.tool()
     def docker_compose_restart(project: str) -> dict: return service.call("docker_compose_restart", project, service.docker.compose_action, "restart")
     @mcp.tool()
-    def available_cli_tools() -> dict: return ok({name: shutil.which(name) for name in ["git", "docker", "python3", "npm", "rg", "ip", "ss"]})
+    def available_cli_tools() -> dict: return ok({name: shutil.which(name, path=config.terminal.controlled_path) for name in ["git", "docker", "python3", "npm", "rg", "ip", "ss"]})
     @mcp.tool()
     def get_system_info() -> dict: return ok(system_tools.system_info())
     @mcp.tool()
@@ -130,9 +137,9 @@ def create_server(config: AppConfig) -> FastMCP:
     @mcp.tool()
     def get_disk_usage() -> dict: return ok(system_tools.disk_usage())
     @mcp.tool()
-    def get_network_interfaces() -> dict: return ok(system_tools.network_interfaces())
+    def get_network_interfaces() -> dict: return ok(system_tools.network_interfaces(config.terminal.controlled_path))
     @mcp.tool()
-    def get_listening_ports() -> dict: return ok(system_tools.listening_ports())
+    def get_listening_ports() -> dict: return ok(system_tools.listening_ports(config.terminal.controlled_path))
     return mcp
 
 
